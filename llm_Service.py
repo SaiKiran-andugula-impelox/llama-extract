@@ -1,48 +1,173 @@
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
+from llama_index.core import VectorStoreIndex, Document, Settings
 from llama_index.llms.huggingface import HuggingFaceLLM
 from llama_index.core.prompts import PromptTemplate
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from prompt import system_prompt, user_prompt  # Make sure prompt.py defines these
+import streamlit as st
+from logger import logger
+import asyncio
+import json
 # Set local embedding model
 Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-base-en-v1.5")
 
-MODEL_PATH = r"D:\Llama models\Llama-3.2-1B-Instruct-HF"
+MODEL_1B = r"D:\Llama_models\Llama3-32_1B_Instruct_HF"
 
 class LlamaExtractionService:
-    def __init__(self, model_path=MODEL_PATH, data_dir="data"):
-        self.llm = HuggingFaceLLM(
-            model_name=model_path,
-            tokenizer_name=model_path,  # <-- Force tokenizer path
-            context_window=4096,
-            max_new_tokens=256,
-            generate_kwargs={
-                "temperature": 0.7,
-                "do_sample": True,
-            },
-            device_map="auto",
-            tokenizer_kwargs={"max_length": 4096},
-        )
-        self.prompt_template = PromptTemplate(system_prompt + "\n" + user_prompt)
-        self.documents = SimpleDirectoryReader(data_dir).load_data()
-        self.index = VectorStoreIndex.from_documents(self.documents)
+    def __init__(self, model_path=MODEL_1B):
+        try:
+            logger.info("Initializing HuggingFaceLLM with model path: %s", model_path)
+            self.llm = HuggingFaceLLM(
+                model_name=model_path,
+                tokenizer_name=model_path,
+                context_window=4096,
+                max_new_tokens=512,
+                generate_kwargs={"temperature": 0.7, "do_sample": True},
+                device_map="auto"
+            )
+            logger.info("LLM initialized successfully.")
+        except Exception as e:
+            logger.error(f"Error initializing LLM: {e}")
+            st.error(f"Error initializing LLM: {e}")
 
-    def chat_with_engine(self, user_input):
-        chat_engine = self.index.as_chat_engine(
-            llm=self.llm,
-            chat_mode="condense_question",
-            text_qa_template=self.prompt_template,
-            verbose=True,
-        )
-        return chat_engine.chat(user_input)
+    async def query_with_engine(self, file_image_content_list, file_text_content_list, text_input, document_name, user_prompt, system_prompt):
+        try:
+            logger.info("Starting query_with_engine...")
+            prompt_template = PromptTemplate(system_prompt + "\n" + user_prompt)
+            documents = []
 
-    def query_with_engine(self, query_text=""):
-        query_engine = self.index.as_query_engine(
-            llm=self.llm,
-            text_qa_template=self.prompt_template,
-        )
-        return query_engine.query(query_text)
+            if file_image_content_list:
+                for idx, file_bytes in enumerate(file_image_content_list or []):
+                    documents.append(
+                        Document(
+                            text="",  # Add OCR result here if you have it
+                            metadata={"source": f"uploaded_file_{idx+1}", "bytes": file_bytes}
+                        )
+                    )
+
+            if file_text_content_list:
+                for idx, text in enumerate(file_text_content_list or []):
+                    if isinstance(text, dict) or isinstance(text, list):
+                        text_str = json.dumps(text, ensure_ascii=False)
+                    else:
+                        text_str = str(text)
+                    documents.append(
+                        Document(
+                            text=text_str,
+                            metadata={"source": f"{document_name or 'text_input'}_{idx+1}"}
+                        )
+                    )
+            
+            if text_input:
+                for idx, text in enumerate(text_input or []):
+                    if isinstance(text, dict) or isinstance(text, list):
+                        text_str = json.dumps(text, ensure_ascii=False)
+                    else:
+                        text_str = str(text)
+                    documents.append(
+                        Document(
+                            text=text_str,
+                            metadata={"source": f"{document_name or 'text_input'}_{idx+1}"}
+                        )
+                    )
+
+            index = VectorStoreIndex.from_documents(documents)
+            query_engine = index.as_query_engine(
+                llm=self.llm,
+                text_qa_template=prompt_template,
+            )
+            # query_text = user_prompt  # or combine with system_prompt if needed
+            # logger.info(f"Querying engine with: {query_text}")
+            response = await asyncio.to_thread(query_engine.query, "")
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error in query_with_engine: {e}")
+            st.error(f"Error in query_with_engine: {e}")
+            return None
+
+    async def chat_with_engine(self, uploaded_files, text_input, document_name, user_prompt, system_prompt, user_input):
+        try:
+            logger.info("Starting chat_with_engine...")
+            prompt_template = PromptTemplate(system_prompt + "\n" + user_prompt)
+            documents = []
+
+            for idx, text in enumerate(text_input or []):
+                documents.append(
+                    Document(
+                        text=text,
+                        metadata={"source": f"{document_name or 'text_input'}_{idx+1}"}
+                    )
+                )
+
+            for idx, file_bytes in enumerate(uploaded_files or []):
+                documents.append(
+                    Document(
+                        text="",  # Add OCR result here if you have it
+                        metadata={"source": f"uploaded_file_{idx+1}", "bytes": file_bytes}
+                    )
+                )
+
+            logger.info(f"Total documents for chat: {len(documents)}")
+            index = VectorStoreIndex.from_documents(documents)
+            chat_engine = index.as_chat_engine(
+                llm=self.llm,
+                chat_mode="condense_question",
+                text_qa_template=prompt_template,
+                verbose=True,
+            )
+            logger.info(f"Chatting with user input: {user_input}")
+            return chat_engine.chat(user_input)
+        except Exception as e:
+            logger.error(f"Error in chat_with_engine: {e}")
+            st.error(f"Error in chat_with_engine: {e}")
+            return None
 
 
+
+# from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings
+# from llama_index.llms.huggingface import HuggingFaceLLM
+# from llama_index.core.prompts import PromptTemplate
+# from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+# from prompt import system_prompt, user_prompt  # Make sure prompt.py defines these
+# # Set local embedding model
+# Settings.embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-base-en-v1.5")
+
+# MODEL_PATH = r"D:\Llama models\Llama-3.2-1B-Instruct-HF"
+
+# class LlamaExtractionService:
+#     def __init__(self, model_path=MODEL_PATH, data_dir="data"):
+#         self.llm = HuggingFaceLLM(
+#             model_name=model_path,
+#             tokenizer_name=model_path,  # <-- Force tokenizer path
+#             context_window=4096,
+#             max_new_tokens=256,
+#             generate_kwargs={
+#                 "temperature": 0.7,
+#                 "do_sample": True,
+#             },
+#             device_map="auto",
+#             tokenizer_kwargs={"max_length": 4096},
+#         )
+#         self.prompt_template = PromptTemplate(system_prompt + "\n" + user_prompt)
+#         self.documents = SimpleDirectoryReader(data_dir).load_data()
+#         self.index = VectorStoreIndex.from_documents(self.documents)
+
+#     def chat_with_engine(self, user_input):
+#         chat_engine = self.index.as_chat_engine(
+#             llm=self.llm,
+#             chat_mode="condense_question",
+#             text_qa_template=self.prompt_template,
+#             verbose=True,
+#         )
+#         return chat_engine.chat(user_input)
+
+#     def query_with_engine(self, query_text=""):
+#         query_engine = self.index.as_query_engine(
+#             llm=self.llm,
+#             text_qa_template=self.prompt_template,
+#         )
+#         return query_engine.query(query_text)
+
+###################################
 
 
 # from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
