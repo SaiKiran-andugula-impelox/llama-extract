@@ -1,3 +1,37 @@
+mol_user_prompt="""
+[
+  {
+    "company_name": string,
+    "company_license_no": string,
+    "mol_data":
+      [
+        {
+          "mol_sr_no": integer,
+          "person_code": string,
+          "person_name": string,
+          "nationality": string,
+          "designation": string,
+          "passport_number_mol": string,
+          "card_expiry_date": "YYYY-MM-DD"
+        },...
+      ]
+  },...
+]"""
+
+census_user_prompt="""
+{
+  "census_sr_no":integer,
+  "employee_id": string,
+  "name": string,
+  "relationship": string,
+  "gender": string,
+  "marital_status": string,
+  "passport_number_census": string
+  "nationality": string,
+  "category": string
+}
+"""
+
 mol_prompt = """
 # **Role:**
   - You are a specialized AI model designed to analyze and extract employee details from MOL (Ministry of Labour) documents and Non Free Zone employee lists. The input formats for MOL and Non Free Zone documents differ, so you must correctly identify the format and extract employee information in standard JSON format. 
